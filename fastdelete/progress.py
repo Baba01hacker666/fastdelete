@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -58,16 +59,20 @@ class ProgressReporter:
         self._last_update_time = 0.0
         self._last_n_lines = 0
         self.start_time = time.time()
+        # Worker threads and the scanning thread render concurrently; keep
+        # each frame write atomic so output never interleaves.
+        self._write_lock = threading.RLock()
 
     def print_verbose(self, action: str, path: str, note: str = "") -> None:
         """Print detailed action line in verbose mode."""
         if self.verbose and not self.quiet:
-            self._clear_live_progress()
-            note_str = f" ({note})" if note else ""
-            prefix = "[DRY-RUN] " if self.dry_run else ""
-            safe_p = safe_path_str(path)
-            self.stream.write(f"{prefix}{action:10s} {safe_p}{note_str}\n")
-            self.stream.flush()
+            with self._write_lock:
+                self._clear_live_progress_locked()
+                note_str = f" ({note})" if note else ""
+                prefix = "[DRY-RUN] " if self.dry_run else ""
+                safe_p = safe_path_str(path)
+                self.stream.write(f"{prefix}{action:10s} {safe_p}{note_str}\n")
+                self.stream.flush()
 
     def update(
         self,
@@ -112,27 +117,34 @@ class ProgressReporter:
                 f"  Elapsed:  {elapsed_str}",
             ]
 
-            self._clear_live_progress()
-            self.stream.write("\n".join(lines) + "\n")
-            self.stream.flush()
-            self._last_n_lines = len(lines)
+            with self._write_lock:
+                self._clear_live_progress_locked()
+                self.stream.write("\n".join(lines) + "\n")
+                self.stream.flush()
+                self._last_n_lines = len(lines)
         else:
             # Periodic non-TTY single line
             line = (
                 f"{header} Discovered: {files_discovered:,} | Deleted: {total_deleted:,} | "
                 f"Failed: {failed:,} | Skipped: {skipped:,} | Rate: {rate:,.0f}/s | Elapsed: {elapsed_str}\n"
             )
-            self.stream.write(line)
-            self.stream.flush()
+            with self._write_lock:
+                self.stream.write(line)
+                self.stream.flush()
 
-    def _clear_live_progress(self) -> None:
-        """Clear previously rendered live progress lines in a TTY."""
+    def _clear_live_progress_locked(self) -> None:
+        """Clear previously rendered live progress lines (caller holds the lock)."""
         if self.is_tty and self._last_n_lines > 0:
             # Move cursor up and clear lines
             for _ in range(self._last_n_lines):
                 self.stream.write("\033[F\033[K")
             self.stream.flush()
             self._last_n_lines = 0
+
+    def _clear_live_progress(self) -> None:
+        """Clear previously rendered live progress lines in a TTY."""
+        with self._write_lock:
+            self._clear_live_progress_locked()
 
     def print_summary(
         self,
@@ -147,9 +159,8 @@ class ProgressReporter:
         elapsed_time: float,
     ) -> None:
         """Print comprehensive operation summary."""
-        self._clear_live_progress()
-
         if self.quiet:
+            self._clear_live_progress()
             return
 
         total_deleted = files_deleted + dirs_deleted
@@ -180,5 +191,7 @@ class ProgressReporter:
             f"{banner}\n",
         ]
 
-        self.stream.write("\n".join(lines))
-        self.stream.flush()
+        with self._write_lock:
+            self._clear_live_progress_locked()
+            self.stream.write("\n".join(lines))
+            self.stream.flush()

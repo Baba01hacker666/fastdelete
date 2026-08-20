@@ -1,5 +1,5 @@
 """
-Filtering logic for fastdelete: globs, sizes, timestamps, depths, and filesystem boundaries.
+Filtering logic for fastdelete: globs, regex, sizes, timestamps, depths, file types, and ignore rules.
 """
 
 from __future__ import annotations
@@ -10,9 +10,12 @@ import re
 import stat
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from fastdelete.errors import FilterParseError
+
+if TYPE_CHECKING:
+    from fastdelete.gitignore import GitIgnoreMatcher
 
 
 _SIZE_UNIT_MULTIPLIERS = {
@@ -118,45 +121,76 @@ class DeletionFilter:
     """
     include_patterns: List[str] = field(default_factory=list)
     exclude_patterns: List[str] = field(default_factory=list)
+    include_regex: List[str] = field(default_factory=list)
+    exclude_regex: List[str] = field(default_factory=list)
+    file_types: Optional[Set[str]] = None  # 'f' (file), 'd' (dir), 'l' (link), 's' (socket), 'p' (fifo)
     min_size: Optional[int] = None
     max_size: Optional[int] = None
     older_than: Optional[float] = None
     newer_than: Optional[float] = None
+    accessed_older_than: Optional[float] = None
+    accessed_newer_than: Optional[float] = None
+    created_older_than: Optional[float] = None
+    created_newer_than: Optional[float] = None
     max_depth: Optional[int] = None
     min_depth: Optional[int] = None
     files_only: bool = False
     dirs_only: bool = False
     empty_dirs_only: bool = False
+    empty_files_only: bool = False
     one_file_system: bool = False
     base_dev: Optional[int] = None
     reference_time: float = field(default_factory=time.time)
+    gitignore_matcher: Optional[GitIgnoreMatcher] = None
+
+    _compiled_include_regex: List[re.Pattern] = field(default_factory=list, init=False)
+    _compiled_exclude_regex: List[re.Pattern] = field(default_factory=list, init=False)
+
+    def __post_init__(self):
+        self._compiled_include_regex = [re.compile(p) for p in self.include_regex]
+        self._compiled_exclude_regex = [re.compile(p) for p in self.exclude_regex]
 
     def has_filters(self) -> bool:
         """Return True if any filtering options are active."""
         return bool(
             self.include_patterns
             or self.exclude_patterns
+            or self.include_regex
+            or self.exclude_regex
+            or self.file_types is not None
             or self.min_size is not None
             or self.max_size is not None
             or self.older_than is not None
             or self.newer_than is not None
+            or self.accessed_older_than is not None
+            or self.accessed_newer_than is not None
+            or self.created_older_than is not None
+            or self.created_newer_than is not None
             or self.max_depth is not None
             or self.min_depth is not None
             or self.files_only
             or self.dirs_only
             or self.empty_dirs_only
+            or self.empty_files_only
             or self.one_file_system
+            or self.gitignore_matcher is not None
         )
 
     def _matches_name_or_path(self, name: str, rel_path: str, patterns: List[str]) -> bool:
-        """Check if filename or relative path matches any pattern."""
+        """Check if filename or relative path matches any glob pattern."""
         for pat in patterns:
             if fnmatch.fnmatch(name, pat):
                 return True
             if fnmatch.fnmatch(rel_path, pat):
                 return True
-            # Also check normalized Unix paths for Windows compatibility
             if "/" in pat and fnmatch.fnmatch(rel_path.replace("\\", "/"), pat):
+                return True
+        return False
+
+    def _matches_regex(self, name: str, rel_path: str, regex_list: List[re.Pattern]) -> bool:
+        """Check if name or rel_path matches any compiled regex."""
+        for r in regex_list:
+            if r.search(name) or r.search(rel_path):
                 return True
         return False
 
@@ -172,7 +206,10 @@ class DeletionFilter:
         """
         # Exclude patterns apply to traversal
         if self.exclude_patterns and self._matches_name_or_path(entry.name, rel_path, self.exclude_patterns):
-            return False, f"Directory matches exclude pattern"
+            return False, "Directory matches exclude pattern"
+
+        if self._compiled_exclude_regex and self._matches_regex(entry.name, rel_path, self._compiled_exclude_regex):
+            return False, "Directory matches exclude regex"
 
         # Max depth check: if depth exceeds max_depth, do not recurse further
         if self.max_depth is not None and depth > self.max_depth:
@@ -184,8 +221,7 @@ class DeletionFilter:
                 st = entry.stat(follow_symlinks=False)
                 if st.st_dev != self.base_dev:
                     return False, f"Filesystem boundary crossed (device {st.st_dev} != base {self.base_dev})"
-            except (OSError, PermissionError) as e:
-                # If stat fails, we let the scanner handle the permission/error upon entering
+            except OSError:
                 pass
 
         return True, None
@@ -203,55 +239,118 @@ class DeletionFilter:
         if self.dirs_only:
             return False, "Skipped (--dirs-only active)"
 
+        if self.empty_dirs_only:
+            return False, "Skipped (--empty-dirs-only active)"
+
         if self.min_depth is not None and depth < self.min_depth:
             return False, f"Depth {depth} is less than min-depth {self.min_depth}"
 
         if self.max_depth is not None and depth > self.max_depth:
             return False, f"Depth {depth} exceeds max-depth {self.max_depth}"
 
-        # Exclude check
+        # Gitignore matcher check
+        if self.gitignore_matcher is not None:
+            if not self.gitignore_matcher.matches(rel_path, is_dir=False):
+                return False, "Does not match gitignore rules"
+
+        # Exclude checks
         if self.exclude_patterns and self._matches_name_or_path(entry.name, rel_path, self.exclude_patterns):
             return False, "Matches exclude pattern"
 
-        # Include check
+        if self._compiled_exclude_regex and self._matches_regex(entry.name, rel_path, self._compiled_exclude_regex):
+            return False, "Matches exclude regex"
+
+        # Include checks
         if self.include_patterns and not self._matches_name_or_path(entry.name, rel_path, self.include_patterns):
             return False, "Does not match include pattern"
 
-        # Size and age checks require stat
+        if self._compiled_include_regex and not self._matches_regex(entry.name, rel_path, self._compiled_include_regex):
+            return False, "Does not match include regex"
+
+        # File type filter
+        if self.file_types is not None:
+            try:
+                is_sym = entry.is_symlink()
+            except OSError:
+                is_sym = False
+
+            if is_sym:
+                ftype = "l"
+            else:
+                try:
+                    is_f = entry.is_file(follow_symlinks=False)
+                    ftype = "f" if is_f else "s"
+                except OSError:
+                    ftype = "f"
+
+            if ftype not in self.file_types:
+                return False, f"File type '{ftype}' not in allowed file types {self.file_types}"
+
+        # Size, age, and empty files check
         needs_stat = (
             self.min_size is not None
             or self.max_size is not None
             or self.older_than is not None
             or self.newer_than is not None
+            or self.accessed_older_than is not None
+            or self.accessed_newer_than is not None
+            or self.created_older_than is not None
+            or self.created_newer_than is not None
+            or self.empty_files_only
         )
 
         if needs_stat:
             try:
                 st = entry.stat(follow_symlinks=False)
             except (FileNotFoundError, PermissionError, OSError) as e:
-                # If stat fails on file (e.g. broken symlink or vanished), we can't verify size/mtime
-                if self.min_size is not None or self.max_size is not None:
+                if self.min_size is not None or self.max_size is not None or self.empty_files_only:
                     return False, f"Cannot stat file for size filtering: {e}"
-                if self.older_than is not None or self.newer_than is not None:
+                if (
+                    self.older_than is not None
+                    or self.newer_than is not None
+                    or self.accessed_older_than is not None
+                    or self.accessed_newer_than is not None
+                    or self.created_older_than is not None
+                    or self.created_newer_than is not None
+                ):
                     return False, f"Cannot stat file for time filtering: {e}"
                 return True, None
 
-            # Size filtering (only applies to regular files, not symlinks)
+            # Empty files only
+            if self.empty_files_only:
+                if stat.S_ISREG(st.st_mode) and st.st_size > 0:
+                    return False, "File is not empty"
+
+            # Size filtering (only applies to regular files)
             if stat.S_ISREG(st.st_mode):
                 if self.min_size is not None and st.st_size < self.min_size:
                     return False, f"File size ({st.st_size} bytes) < min-size ({self.min_size} bytes)"
                 if self.max_size is not None and st.st_size > self.max_size:
                     return False, f"File size ({st.st_size} bytes) > max-size ({self.max_size} bytes)"
 
-            # Time filtering (mtime)
+            # Modified time (mtime)
             mtime = st.st_mtime
-            age = self.reference_time - mtime
+            m_age = self.reference_time - mtime
+            if self.older_than is not None and m_age < self.older_than:
+                return False, f"File age ({m_age:.1f}s) is newer than older-than ({self.older_than:.1f}s)"
+            if self.newer_than is not None and m_age > self.newer_than:
+                return False, f"File age ({m_age:.1f}s) is older than newer-than ({self.newer_than:.1f}s)"
 
-            if self.older_than is not None and age < self.older_than:
-                return False, f"File age ({age:.1f}s) is newer than older-than ({self.older_than:.1f}s)"
+            # Accessed time (atime)
+            atime = st.st_atime
+            a_age = self.reference_time - atime
+            if self.accessed_older_than is not None and a_age < self.accessed_older_than:
+                return False, f"Access age ({a_age:.1f}s) is newer than accessed-older-than ({self.accessed_older_than:.1f}s)"
+            if self.accessed_newer_than is not None and a_age > self.accessed_newer_than:
+                return False, f"Access age ({a_age:.1f}s) is older than accessed-newer-than ({self.accessed_newer_than:.1f}s)"
 
-            if self.newer_than is not None and age > self.newer_than:
-                return False, f"File age ({age:.1f}s) is older than newer-than ({self.newer_than:.1f}s)"
+            # Created / metadata time (ctime)
+            ctime = st.st_ctime
+            c_age = self.reference_time - ctime
+            if self.created_older_than is not None and c_age < self.created_older_than:
+                return False, f"Creation age ({c_age:.1f}s) is newer than created-older-than ({self.created_older_than:.1f}s)"
+            if self.created_newer_than is not None and c_age > self.created_newer_than:
+                return False, f"Creation age ({c_age:.1f}s) is older than created-newer-than ({self.created_newer_than:.1f}s)"
 
         return True, None
 
@@ -267,6 +366,9 @@ class DeletionFilter:
         if self.files_only:
             return False, "Skipped (--files-only active)"
 
+        if self.file_types is not None and "d" not in self.file_types:
+            return False, "Skipped ('d' not in file types)"
+
         if self.min_depth is not None and depth < self.min_depth:
             return False, f"Depth {depth} is less than min-depth {self.min_depth}"
 
@@ -275,5 +377,12 @@ class DeletionFilter:
 
         if self.exclude_patterns and self._matches_name_or_path(dir_name, rel_path, self.exclude_patterns):
             return False, "Directory matches exclude pattern"
+
+        if self._compiled_exclude_regex and self._matches_regex(dir_name, rel_path, self._compiled_exclude_regex):
+            return False, "Directory matches exclude regex"
+
+        if self.gitignore_matcher is not None:
+            if not self.gitignore_matcher.matches(rel_path, is_dir=True):
+                return False, "Does not match gitignore rules"
 
         return True, None

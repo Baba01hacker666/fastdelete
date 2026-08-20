@@ -282,6 +282,57 @@ def inspect_target(target_path: str | Path) -> TargetIdentity:
     )
 
 
+def classify_target_danger(identity: TargetIdentity) -> tuple:
+    """
+    Classify how dangerous a deletion target is.
+
+    Returns a tuple (is_root, is_system_critical, is_home):
+      - is_root: target (or its resolved path) is a filesystem root.
+      - is_system_critical: target matches a protected system path that is
+        NOT merely the user's home directory.
+      - is_home: target is the current user's home directory.
+    """
+    target_norm = os.path.normpath(identity.abs_path)
+    real_norm = os.path.normpath(identity.real_path)
+
+    is_root = target_norm == "/" or real_norm == "/"
+    if sys.platform == "win32":
+        target_lower = target_norm.lower()
+        if len(target_lower) == 3 and target_lower[1:] == ":\\":
+            is_root = True
+        real_lower = real_norm.lower()
+        if len(real_lower) == 3 and real_lower[1:] == ":\\":
+            is_root = True
+
+    user_home = get_user_home()
+    home_norm = os.path.normpath(user_home) if user_home else None
+    is_home = False
+    if home_norm:
+        if sys.platform == "win32":
+            is_home = (
+                target_norm.lower() == home_norm.lower()
+                or real_norm.lower() == home_norm.lower()
+            )
+        else:
+            is_home = target_norm == home_norm or real_norm == home_norm
+
+    is_system = False
+    dangerous_paths = get_dangerous_paths()
+    check_targets = {target_norm, real_norm}
+    if sys.platform == "win32":
+        check_targets = {t.lower() for t in check_targets}
+        home_cmp = home_norm.lower() if home_norm else None
+    else:
+        home_cmp = home_norm
+
+    for dt in check_targets:
+        if dt in dangerous_paths and dt != home_cmp:
+            is_system = True
+            break
+
+    return is_root, is_system, is_home
+
+
 def validate_safety(
     identity: TargetIdentity,
     allow_root: bool = False,
@@ -291,32 +342,13 @@ def validate_safety(
     Validate that the target is safe to delete.
     Raises SafetyError if target is dangerous and appropriate override is not provided.
     """
-    target_norm = os.path.normpath(identity.abs_path)
-    real_norm = os.path.normpath(identity.real_path)
+    is_root, is_system, is_home = classify_target_danger(identity)
 
-    # Check root directory specifically
-    is_posix_root = target_norm == "/" or real_norm == "/"
-    is_win_root = False
-    if sys.platform == "win32":
-        target_lower = target_norm.lower()
-        if len(target_lower) == 3 and target_lower[1:] == ":\\":
-            is_win_root = True
-
-    if (is_posix_root or is_win_root) and not allow_root:
+    if is_root and not allow_root:
         raise SafetyError(
             f"Refusing to delete root filesystem '{safe_path_str(identity.abs_path)}'. "
             f"Root deletion is blocked by safety policy."
         )
-
-    # Check user home directory
-    user_home = get_user_home()
-    is_home = False
-    if user_home:
-        home_norm = os.path.normpath(user_home)
-        if sys.platform == "win32":
-            is_home = target_norm.lower() == home_norm.lower() or real_norm.lower() == home_norm.lower()
-        else:
-            is_home = target_norm == home_norm or real_norm == home_norm
 
     if is_home and not allow_home and not allow_root:
         raise SafetyError(
@@ -324,19 +356,11 @@ def validate_safety(
             f"Override with --allow-home if this is intentional."
         )
 
-    # Check dangerous system directories
-    dangerous_paths = get_dangerous_paths()
-    check_targets = {target_norm, real_norm}
-    if sys.platform == "win32":
-        check_targets = {p.lower() for p in check_targets}
-
-    for dt in check_targets:
-        if dt in dangerous_paths:
-            if is_home and allow_home:
-                continue
-            if not allow_root:
-                raise SafetyError(
-                    f"Refusing to delete critical system directory '{safe_path_str(identity.abs_path)}' "
-                    f"(matches protected path '{safe_path_str(dt)}'). "
-                    f"Override with --allow-root if this is intentional."
-                )
+    # Protected system directories require --allow-root even when --allow-home
+    # is set, unless the matched protected path IS the home directory itself.
+    if is_system and not allow_root:
+        raise SafetyError(
+            f"Refusing to delete critical system directory '{safe_path_str(identity.abs_path)}' "
+            f"(matches a protected system path). "
+            f"Override with --allow-root if this is intentional."
+        )
