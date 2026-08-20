@@ -20,15 +20,22 @@
 - **Disk Usage & Duplicate Finder**: High-speed recursive directory tree sizing and 3-stage duplicate detection.
 - **Zero Runtime Dependencies**: Built entirely on standard Python 3.8+ primitives.
 
----
-
 ## 📦 Installation
 
+### From PyPI
 ```bash
-# From PyPI
 pip install fastdelete
+```
 
-# Or run standalone with zero installation
+### From Source (Local Development)
+```bash
+git clone https://github.com/Baba01hacker666/fastdelete.git
+cd fastdelete
+pip install -e .
+```
+
+### Standalone (Zero Install)
+```bash
 python3 -m fastdelete.cli /path/to/folder --yes
 ```
 
