@@ -3,8 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
+# C extensions and binaries
 *.so
+bench/bench_generator
+bench/bench_c_delete
 
 # Distribution / packaging
 .Python

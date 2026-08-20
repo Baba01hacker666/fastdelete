@@ -10,6 +10,8 @@ import stat
 import sys
 import time
 import threading
+import ctypes
+from ctypes import Structure, c_char_p, c_int, c_uint64, POINTER, byref
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +27,46 @@ from fastdelete.safety import (
     safe_path_str,
 )
 from fastdelete.scanner import DirectoryScanner, ScanItem
+
+
+class _CDeleteStats(Structure):
+    _fields_ = [
+        ("files_discovered", c_uint64),
+        ("files_deleted", c_uint64),
+        ("dirs_deleted", c_uint64),
+        ("bytes_deleted", c_uint64),
+        ("skipped", c_uint64),
+        ("failed", c_uint64),
+    ]
+
+
+_C_LIB = None
+
+def get_c_engine():
+    global _C_LIB
+    if _C_LIB is not None:
+        return _C_LIB
+
+    lib_path = Path(__file__).resolve().parent / "_fastdelete_c.so"
+    if lib_path.exists():
+        try:
+            lib = ctypes.CDLL(str(lib_path))
+            lib.c_fastdelete_tree.argtypes = [
+                c_char_p,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                POINTER(c_int),
+                POINTER(_CDeleteStats),
+            ]
+            lib.c_fastdelete_tree.restype = c_int
+            _C_LIB = lib
+            return _C_LIB
+        except Exception:
+            return None
+    return None
 
 
 @dataclass
@@ -67,6 +109,7 @@ class FastDeleter:
         log_file: Optional[str] = None,
         delete_root_dir: bool = True,
         abort_event: Optional[threading.Event] = None,
+        use_c_engine: bool = True,
     ):
         self.raw_target_path = target_path
         self.abs_target_path = os.path.abspath(target_path)
@@ -78,6 +121,7 @@ class FastDeleter:
         self.log_file = log_file
         self.delete_root_dir = delete_root_dir
         self.abort_event = abort_event or threading.Event()
+        self.use_c_engine = use_c_engine
         self.stats = DeletionStats()
         self._stats_lock = threading.Lock()
         self._log_lock = threading.Lock()
@@ -287,7 +331,25 @@ class FastDeleter:
             delete_root_dir=self.delete_root_dir,
         )
 
-        if self.workers > 1:
+        # Check if C engine can be used for maximum raw performance
+        c_engine = get_c_engine() if self.use_c_engine else None
+        can_use_c = (
+            c_engine is not None
+            and not self.filter.include_patterns
+            and not self.filter.exclude_patterns
+            and self.filter.min_size is None
+            and self.filter.max_size is None
+            and self.filter.older_than is None
+            and self.filter.newer_than is None
+            and not self.filter.files_only
+            and not self.filter.dirs_only
+            and not self.filter.empty_dirs_only
+            and not (self.progress and self.progress.verbose)
+        )
+
+        if can_use_c:
+            self._run_c_engine(c_engine)
+        elif self.workers > 1:
             self._run_parallel(scanner)
         else:
             self._run_sequential(scanner)
@@ -301,6 +363,43 @@ class FastDeleter:
         self.stats.end_time = time.time()
         self._finish_progress_and_log()
         return self.stats
+
+    def _run_c_engine(self, c_engine) -> None:
+        """Execute native compiled C acceleration engine."""
+        c_stats = _CDeleteStats()
+        abort_val = ctypes.c_int(1 if self.abort_event.is_set() else 0)
+        max_d = self.filter.max_depth if self.filter.max_depth is not None else 0
+
+        target_bytes = self.abs_target_path.encode("utf-8", errors="surrogateescape")
+        ret = c_engine.c_fastdelete_tree(
+            target_bytes,
+            1 if self.dry_run else 0,
+            1 if self.force else 0,
+            1 if self.filter.one_file_system else 0,
+            max_d,
+            1 if self.delete_root_dir else 0,
+            ctypes.byref(abort_val),
+            ctypes.byref(c_stats),
+        )
+
+        with self._stats_lock:
+            self.stats.files_discovered = c_stats.files_discovered
+            self.stats.files_deleted = c_stats.files_deleted
+            self.stats.directories_deleted = c_stats.dirs_deleted
+            self.stats.bytes_deleted = c_stats.bytes_deleted
+            self.stats.skipped = c_stats.skipped
+            self.stats.failed = c_stats.failed
+
+        if self.progress:
+            self.progress.update(
+                files_discovered=self.stats.files_discovered,
+                files_deleted=self.stats.files_deleted,
+                dirs_deleted=self.stats.directories_deleted,
+                failed=self.stats.failed,
+                skipped=self.stats.skipped,
+                bytes_deleted=self.stats.bytes_deleted,
+                force=True,
+            )
 
     def _run_sequential(self, scanner: DirectoryScanner) -> None:
         """Single-threaded streaming execution."""
