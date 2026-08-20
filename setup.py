@@ -6,6 +6,7 @@ this setup hook builds the ``_fastdelete_c`` accelerator when a POSIX
 compiler is available and silently falls back otherwise.
 """
 
+import os
 import sys
 
 from setuptools import Extension, setup
@@ -35,7 +36,7 @@ class OptionalBuildExt(build_ext):
 
 
 ext_modules = []
-if sys.platform != "win32":
+if sys.platform != "win32" and ("bdist_wheel" not in sys.argv or os.environ.get("CIBUILDWHEEL")):
     ext_modules.append(
         Extension(
             "fastdelete._fastdelete_c",
