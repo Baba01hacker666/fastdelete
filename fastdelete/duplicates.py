@@ -159,6 +159,7 @@ def find_duplicates(
 
     for (sz, f_hash), paths in full_map.items():
         if len(paths) > 1:
+            paths.sort()
             group = DuplicateGroup(hash=f_hash, size=sz, paths=paths)
             groups.append(group)
             total_dupes += len(paths) - 1
@@ -226,6 +227,8 @@ def clean_duplicates(
             paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
         elif keep_strategy == "oldest":
             paths.sort(key=lambda p: os.path.getmtime(p))
+        else:
+            paths.sort()
 
         primary = paths[0]
         duplicates_to_process = paths[1:]

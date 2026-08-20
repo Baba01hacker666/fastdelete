@@ -15,10 +15,16 @@ from fastdelete.trash import (
 )
 
 
-def test_move_to_trash_and_list(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def isolated_trash_dir(tmp_path, monkeypatch):
+    """Ensure every test gets an isolated custom trash directory on all OS platforms."""
     custom_trash = tmp_path / "custom_trash"
+    monkeypatch.setenv("FASTDELETE_TRASH_DIR", str(custom_trash))
     monkeypatch.setenv("XDG_DATA_HOME", str(custom_trash))
+    return custom_trash
 
+
+def test_move_to_trash_and_list(tmp_path):
     f = tmp_path / "document.pdf"
     f.write_text("important document")
 
@@ -33,10 +39,7 @@ def test_move_to_trash_and_list(tmp_path, monkeypatch):
     assert any(it.id == item.id for it in items)
 
 
-def test_restore_trash_item(tmp_path, monkeypatch):
-    custom_trash = tmp_path / "custom_trash"
-    monkeypatch.setenv("XDG_DATA_HOME", str(custom_trash))
-
+def test_restore_trash_item(tmp_path):
     f = tmp_path / "restore_me.txt"
     f.write_text("content to restore")
 
@@ -49,10 +52,7 @@ def test_restore_trash_item(tmp_path, monkeypatch):
     assert f.read_text() == "content to restore"
 
 
-def test_empty_trash(tmp_path, monkeypatch):
-    custom_trash = tmp_path / "custom_trash"
-    monkeypatch.setenv("XDG_DATA_HOME", str(custom_trash))
-
+def test_empty_trash(tmp_path):
     f1 = tmp_path / "t1.txt"
     f2 = tmp_path / "t2.txt"
     f1.write_text("1")

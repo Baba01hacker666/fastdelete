@@ -33,14 +33,13 @@ class TrashItem:
 
 def get_trash_dir() -> Path:
     """Get the active Trash directory for the current user and platform."""
-    if sys.platform == "darwin":
+    custom = os.environ.get("FASTDELETE_TRASH_DIR") or os.environ.get("XDG_DATA_HOME")
+    if custom:
+        trash = Path(custom) / "Trash"
+    elif sys.platform == "darwin":
         trash = Path.home() / ".Trash"
     else:
-        xdg_data = os.environ.get("XDG_DATA_HOME")
-        if xdg_data:
-            trash = Path(xdg_data) / "Trash"
-        else:
-            trash = Path.home() / ".local" / "share" / "Trash"
+        trash = Path.home() / ".local" / "share" / "Trash"
 
     trash.mkdir(parents=True, exist_ok=True)
     (trash / "files").mkdir(parents=True, exist_ok=True)

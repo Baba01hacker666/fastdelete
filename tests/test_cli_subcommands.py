@@ -49,6 +49,7 @@ def test_cli_dupes_subcommand(tmp_path, capsys):
 
 def test_cli_trash_subcommand(tmp_path, monkeypatch, capsys):
     custom_trash = tmp_path / "custom_trash"
+    monkeypatch.setenv("FASTDELETE_TRASH_DIR", str(custom_trash))
     monkeypatch.setenv("XDG_DATA_HOME", str(custom_trash))
 
     f = tmp_path / "target.txt"
