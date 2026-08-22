@@ -8,18 +8,17 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 from fastdelete.analyzer import DiskUsageSummary, analyze_directory
 from fastdelete.deleter import DeletionStats, FastDeleter
-from fastdelete.duplicates import DuplicateReport, clean_duplicates, find_duplicates
-from fastdelete.errors import InvalidTargetError, SafetyError
+from fastdelete.duplicates import DuplicateReport, find_duplicates
 from fastdelete.filters import DeletionFilter
-from fastdelete.presets import Preset, get_preset, list_presets, run_preset_clean
+from fastdelete.presets import run_preset_clean
 from fastdelete.progress import ProgressReporter
 from fastdelete.safety import inspect_target, validate_safety
-from fastdelete.shredder import ShredMethod, shred_file
-from fastdelete.trash import TrashItem, empty_trash, list_trash, move_to_trash, restore_trash_item
+from fastdelete.shredder import ShredMethod
+from fastdelete.trash import TrashItem, move_to_trash, restore_trash_item
 
 
 def delete(

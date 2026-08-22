@@ -2,12 +2,10 @@
 Tests for safe trash operations in fastdelete.trash.
 """
 
-import os
 from pathlib import Path
 import pytest
 
 from fastdelete.trash import (
-    get_trash_dir,
     move_to_trash,
     list_trash,
     restore_trash_item,
@@ -64,3 +62,39 @@ def test_empty_trash(tmp_path):
 
     empty_trash()
     assert len(list_trash()) == 0
+
+
+def test_trash_symlink_moves_link_not_target(tmp_path):
+    """Trashing a symlink must move the link itself, never its target file."""
+    real_file = tmp_path / "real_target.txt"
+    real_file.write_text("precious data")
+    link = tmp_path / "link.txt"
+    link.symlink_to(real_file)
+
+    item = move_to_trash(link)
+
+    # The link is gone from its original spot...
+    assert not link.exists()
+    # ...but the actual target MUST remain untouched at its original path.
+    assert real_file.exists()
+    assert real_file.read_text() == "precious data"
+    # The trashed payload IS the symlink, not the target.
+    assert Path(item.trash_path).is_symlink()
+
+
+def test_restore_with_missing_original_path_requires_destination(tmp_path):
+    """Restore of an item with no recorded Path= must fail instead of restoring to cwd."""
+    f = tmp_path / "no_orig.txt"
+    f.write_text("data")
+    item = move_to_trash(f)
+
+    # Corrupt the info file by removing the Path entry
+    info = Path(item.info_path)
+    lines = [l for l in info.read_text().splitlines() if not l.startswith("Path=")]
+    info.write_text("\n".join(lines) + "\n")
+
+    import pytest
+    from fastdelete.errors import FastDeleteError
+
+    with pytest.raises(FastDeleteError):
+        restore_trash_item(item.id)

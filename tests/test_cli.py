@@ -2,12 +2,9 @@
 Tests for fastdelete CLI argument parsing, interactive confirmations, and execution.
 """
 
-import sys
 from unittest.mock import patch
-import pytest
 
 from fastdelete.cli import build_filter, create_parser, main
-from fastdelete.errors import FilterParseError
 
 
 def test_cli_parser_defaults():

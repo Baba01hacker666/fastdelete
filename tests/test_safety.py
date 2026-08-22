@@ -3,13 +3,10 @@ Tests for fastdelete safety checks, target inspection, and path sanitization.
 """
 
 import os
-import sys
 import pytest
-from pathlib import Path
 
 from fastdelete.errors import InvalidTargetError, SafetyError
 from fastdelete.safety import (
-    get_dangerous_paths,
     get_user_home,
     inspect_target,
     safe_path_str,

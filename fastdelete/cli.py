@@ -32,7 +32,6 @@ from fastdelete.errors import (
 from fastdelete.filters import DeletionFilter, parse_duration, parse_size
 from fastdelete.gitignore import GitIgnoreMatcher
 from fastdelete.presets import (
-    get_preset,
     list_presets,
     run_preset_clean,
 )
@@ -43,7 +42,6 @@ from fastdelete.safety import (
     safe_path_str,
     validate_safety,
 )
-from fastdelete.shredder import ShredMethod
 from fastdelete.trash import (
     empty_trash,
     list_trash,
@@ -488,6 +486,11 @@ def handle_du_subcommand(sub_args: List[str]) -> int:
     parser.add_argument("--json", action="store_true", help="Output analysis in JSON format.")
 
     args = parser.parse_args(sub_args)
+
+    if not os.path.exists(args.path):
+        sys.stderr.write(f"Error: path does not exist: {args.path}\n")
+        return 1
+
     summary = analyze_directory(args.path, top_n=args.top, max_depth=args.max_depth)
 
     if args.json:
@@ -506,8 +509,19 @@ def handle_dupes_subcommand(sub_args: List[str]) -> int:
     parser.add_argument("--delete", action="store_true", help="Automatically delete duplicate copies (keeps first).")
     parser.add_argument("--hardlink", action="store_true", help="Replace duplicates with hardlinks.")
     parser.add_argument("--dry-run", action="store_true", help="Simulate deletion of duplicates.")
+    parser.add_argument(
+        "--keep",
+        choices=["first", "newest", "oldest"],
+        default="first",
+        help="Which copy to keep when deleting/hardlinking duplicates (default: first).",
+    )
 
     args = parser.parse_args(sub_args)
+
+    if not os.path.isdir(args.path):
+        sys.stderr.write(f"Error: directory does not exist: {args.path}\n")
+        return 1
+
     min_sz = parse_size(args.min_size) if args.min_size else 1
     report = find_duplicates(args.path, min_size=min_sz)
 
@@ -518,7 +532,7 @@ def handle_dupes_subcommand(sub_args: List[str]) -> int:
 
     if args.delete or args.hardlink or args.dry_run:
         action = "hardlink" if args.hardlink else ("dry-run" if args.dry_run else "delete")
-        stats = clean_duplicates(report, action=action)
+        stats = clean_duplicates(report, keep_strategy=args.keep, action=action)
         print(f"\n[+] Action '{action}' complete: {stats.files_deleted} duplicates processed.")
 
     return 0

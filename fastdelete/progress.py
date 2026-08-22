@@ -4,12 +4,9 @@ Terminal progress reporting and summary formatting for fastdelete.
 
 from __future__ import annotations
 
-import os
 import sys
 import threading
 import time
-from typing import Optional
-
 from fastdelete.safety import safe_path_str
 
 

@@ -10,14 +10,13 @@ import errno
 import json
 import os
 import stat
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_uint64
+from ctypes import POINTER, Structure, c_char_p, c_int, c_uint64
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from fastdelete.errors import DeletionErrorRecord, PathChangedError
 from fastdelete.filters import DeletionFilter
@@ -527,6 +526,12 @@ class FastDeleter:
             ctypes.byref(self._c_abort_flag),
             ctypes.byref(c_stats),
         )
+
+        if ret != 0 and c_stats.failed == 0:
+            # Engine-level failure (e.g. target vanished before traversal);
+            # ensure the failure is reflected in stats.
+            with self._stats_lock:
+                self.stats.failed += 1
 
         with self._stats_lock:
             self.stats.files_discovered = c_stats.files_discovered

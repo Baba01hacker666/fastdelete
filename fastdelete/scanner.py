@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Generator, List, Optional
 
 from fastdelete.filters import DeletionFilter
-from fastdelete.safety import safe_path_str
 
 
 @dataclass

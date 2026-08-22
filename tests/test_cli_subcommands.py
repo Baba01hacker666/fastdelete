@@ -2,9 +2,7 @@
 Tests for CLI subcommands and JSON outputs.
 """
 
-from pathlib import Path
 import json
-import pytest
 
 from fastdelete.cli import main
 
@@ -34,6 +32,18 @@ def test_cli_du_subcommand(tmp_path, capsys):
     out = capsys.readouterr().out
     data = json.loads(out)
     assert data["total_files"] == 1
+
+
+def test_cli_du_missing_path(tmp_path, capsys):
+    exit_code = main(["du", str(tmp_path / "does_not_exist")])
+    assert exit_code == 1
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_cli_dupes_missing_path(tmp_path, capsys):
+    exit_code = main(["dupes", str(tmp_path / "does_not_exist")])
+    assert exit_code == 1
+    assert "does not exist" in capsys.readouterr().err
 
 
 def test_cli_dupes_subcommand(tmp_path, capsys):

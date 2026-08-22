@@ -2,8 +2,6 @@
 Tests for disk space tree analyzer in fastdelete.analyzer.
 """
 
-from pathlib import Path
-import pytest
 
 from fastdelete.analyzer import (
     analyze_directory,

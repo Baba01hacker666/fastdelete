@@ -8,15 +8,12 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
-from urllib.parse import quote, unquote
 
 from fastdelete.errors import FastDeleteError, InvalidTargetError
-from fastdelete.safety import normalize_long_path
 
 
 @dataclass
@@ -79,7 +76,9 @@ def move_to_trash(target_path: Union[str, Path]) -> TrashItem:
     Move a file or directory to the Trash bin with .trashinfo metadata.
     Returns the created TrashItem.
     """
-    target = Path(target_path).resolve()
+    # Use abspath (NOT resolve) so symlinks are moved as-is instead of
+    # dragging their target files into the Trash.
+    target = Path(os.path.abspath(target_path))
     if not target.exists() and not target.is_symlink():
         raise InvalidTargetError(f"Target does not exist: {target}")
 
@@ -213,9 +212,12 @@ def restore_trash_item(item_id_or_name: str, destination: Optional[Union[str, Pa
     except Exception:
         pass
 
-    target_dest = Path(destination) if destination else Path(orig_path)
+    target_dest = Path(destination) if destination else (Path(orig_path) if orig_path else None)
     if not target_dest:
-        raise FastDeleteError("Could not determine restoration path.")
+        raise FastDeleteError(
+            f"Could not determine restoration path for '{item_id_or_name}'. "
+            f"Provide an explicit destination."
+        )
 
     # Create parent directory if needed
     target_dest.parent.mkdir(parents=True, exist_ok=True)

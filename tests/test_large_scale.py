@@ -2,15 +2,10 @@
 Tests for scale simulation (millions of entries) and signal interrupt handling.
 """
 
-import gc
-import os
 import threading
-import time
-import pytest
-from pathlib import Path
 
 from fastdelete.deleter import FastDeleter
-from fastdelete.scanner import DirectoryScanner, ScanItem
+from fastdelete.scanner import ScanItem
 
 
 def test_million_entry_memory_and_streaming_simulation():

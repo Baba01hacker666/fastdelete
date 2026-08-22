@@ -113,6 +113,8 @@ __all__ = [
     "DiskUsageSummary",
     "DuplicateGroup",
     "DuplicateReport",
+    "render_analyzer_report",
+    "render_duplicates_report",
     "GitIgnoreMatcher",
     "GitIgnoreRule",
     "DeletionErrorRecord",

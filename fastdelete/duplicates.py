@@ -7,14 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import stat
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
-from fastdelete.deleter import DeletionStats, FastDeleter
+from fastdelete.deleter import DeletionStats
 from fastdelete.progress import format_bytes
 from fastdelete.safety import safe_path_str
 
@@ -220,6 +221,15 @@ def clean_duplicates(
     """
     stats = DeletionStats()
 
+    def record_error(path: str, operation: str, exc: Exception) -> None:
+        from fastdelete.errors import DeletionErrorRecord
+
+        stats.failed += 1
+        if len(stats.errors) < 1000:
+            stats.errors.append(
+                DeletionErrorRecord.from_exception(path, operation, exc)
+            )
+
     for group in report.groups:
         paths = list(group.paths)
 
@@ -234,6 +244,9 @@ def clean_duplicates(
         duplicates_to_process = paths[1:]
 
         for dupe_path in duplicates_to_process:
+            if action != "dry-run" and not os.path.lexists(dupe_path):
+                continue
+
             stats.files_discovered += 1
 
             if action == "dry-run":
@@ -241,19 +254,34 @@ def clean_duplicates(
                 stats.bytes_deleted += group.size
             elif action == "hardlink":
                 try:
-                    # Remove dupe and link to primary
+                    # Replace dupe with a hardlink to primary (same inode).
+                    st_dupe = os.lstat(dupe_path)
+                    st_primary = os.lstat(primary)
+                    if (
+                        st_dupe.st_dev == st_primary.st_dev
+                        and st_dupe.st_ino == st_primary.st_ino
+                    ):
+                        # Already the same inode; nothing to do.
+                        stats.files_deleted += 1
+                        continue
                     os.unlink(dupe_path)
-                    os.link(primary, dupe_path)
+                    try:
+                        os.link(primary, dupe_path)
+                    except OSError:
+                        # Cross-device or link unsupported: restore copy.
+                        shutil.copy2(primary, dupe_path)
+                        raise
                     stats.files_deleted += 1
                     stats.bytes_deleted += group.size
-                except OSError:
-                    stats.failed += 1
+                except OSError as e:
+                    record_error(dupe_path, "hardlink", e)
             else:
-                # Actual delete
-                deleter = FastDeleter(dupe_path)
-                st = deleter.run()
-                stats.files_deleted += st.files_deleted
-                stats.bytes_deleted += st.bytes_deleted
-                stats.failed += st.failed
+                # Actual delete via direct unlink (duplicates are regular files).
+                try:
+                    os.unlink(dupe_path)
+                    stats.files_deleted += 1
+                    stats.bytes_deleted += group.size
+                except OSError as e:
+                    record_error(dupe_path, "unlink", e)
 
     return stats

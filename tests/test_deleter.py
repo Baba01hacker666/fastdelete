@@ -5,13 +5,8 @@ Tests for FastDeleter: normal files, unusual filenames, symlinks, permissions, d
 import os
 import stat
 import sys
-import threading
-import pytest
-from pathlib import Path
 
 from fastdelete.deleter import FastDeleter
-from fastdelete.filters import DeletionFilter
-from fastdelete.progress import ProgressReporter
 from fastdelete.scanner import ScanItem
 
 
@@ -126,7 +121,7 @@ def test_symlink_to_file_preserves_target(tmp_path):
     link.symlink_to(target)
 
     deleter = FastDeleter(str(link_dir))
-    stats = deleter.run()
+    deleter.run()
 
     assert not link_dir.exists()
     assert not link.exists()
@@ -148,7 +143,7 @@ def test_symlink_to_directory_preserves_target_directory(tmp_path):
     dir_symlink.symlink_to(real_dir)
 
     deleter = FastDeleter(str(link_dir))
-    stats = deleter.run()
+    deleter.run()
 
     assert not link_dir.exists()
     # Real directory and its secret file MUST remain untouched!
@@ -267,7 +262,7 @@ def test_failure_logging(tmp_path):
     root.mkdir()
 
     deleter = FastDeleter(str(root), log_file=str(log_file))
-    stats = deleter.run()
+    deleter.run()
 
     assert log_file.exists()
     content = log_file.read_text()

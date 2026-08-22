@@ -5,12 +5,11 @@ Implements gitignore pattern specification including negation, directory-only ma
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 
 @dataclass
@@ -69,10 +68,9 @@ def _translate_gitignore_to_regex(pattern: str, is_dir_only: bool, is_anchored: 
             res.append(c)
             i += 1
 
-    if is_dir_only:
-        res.append("(?:/.*)?$")
-    else:
-        res.append("(?:/.*)?$")
+    # Trailing "/*" allows directory-only rules to also match their contents;
+    # file/dir distinction is enforced by GitIgnoreRule.is_dir_only.
+    res.append("(?:/.*)?$")
 
     pattern_str = "".join(res)
     return re.compile(pattern_str)

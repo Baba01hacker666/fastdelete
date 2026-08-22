@@ -3,7 +3,6 @@ Tests for secure file shredder in fastdelete.shredder.
 """
 
 import os
-from pathlib import Path
 import pytest
 
 from fastdelete.shredder import (

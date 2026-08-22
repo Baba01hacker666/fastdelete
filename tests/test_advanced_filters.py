@@ -2,12 +2,9 @@
 Tests for advanced regex, file type, empty files, and gitignore filtering.
 """
 
-from pathlib import Path
-import pytest
 
 from fastdelete.filters import DeletionFilter
 from fastdelete.deleter import FastDeleter
-from fastdelete.gitignore import GitIgnoreMatcher
 
 
 def test_filter_regex(tmp_path):

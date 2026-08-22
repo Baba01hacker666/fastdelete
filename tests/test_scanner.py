@@ -2,9 +2,6 @@
 Tests for iterative directory scanner and deep tree traversal.
 """
 
-import os
-import pytest
-from pathlib import Path
 
 from fastdelete.filters import DeletionFilter
 from fastdelete.scanner import DirectoryScanner

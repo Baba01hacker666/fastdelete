@@ -11,7 +11,7 @@ import dataclasses
 from pathlib import Path
 from typing import Optional, Set
 
-from fastdelete.errors import InvalidTargetError, SafetyError, PathChangedError
+from fastdelete.errors import InvalidTargetError, SafetyError
 
 
 # Standard POSIX critical system directories

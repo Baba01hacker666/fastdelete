@@ -2,8 +2,6 @@
 Tests for gitignore pattern parser and matcher in fastdelete.gitignore.
 """
 
-from pathlib import Path
-import pytest
 
 from fastdelete.gitignore import (
     GitIgnoreMatcher,

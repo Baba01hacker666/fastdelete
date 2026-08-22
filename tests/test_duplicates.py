@@ -2,8 +2,6 @@
 Tests for duplicate file detection and cleanup in fastdelete.duplicates.
 """
 
-from pathlib import Path
-import pytest
 
 from fastdelete.duplicates import (
     find_duplicates,

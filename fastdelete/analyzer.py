@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import heapq
 import os
-import stat
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from fastdelete.progress import format_bytes, format_duration
+from fastdelete.progress import format_bytes
 from fastdelete.safety import safe_path_str
 
 

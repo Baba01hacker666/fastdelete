@@ -8,11 +8,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 from fastdelete.deleter import DeletionStats, FastDeleter
 from fastdelete.errors import FastDeleteError
-from fastdelete.filters import DeletionFilter
 
 
 @dataclass
@@ -36,7 +35,6 @@ PRESETS: Dict[str, Preset] = {
             ".ruff_cache",
             ".tox",
             ".nox",
-            ".coverage",
             "htmlcov",
             ".hypothesis",
             "dist",
@@ -46,6 +44,7 @@ PRESETS: Dict[str, Preset] = {
             "*.pyc",
             "*.pyo",
             "*.pyd",
+            ".coverage",
             ".coverage.*",
             "coverage.xml",
             "*.egg-info",
@@ -145,8 +144,6 @@ PRESETS: Dict[str, Preset] = {
         name="temp",
         description="OS temporary files, editor backups, and system junk",
         dir_names=[
-            ".DS_Store",
-            "Thumbs.db",
             ".tmp",
         ],
         file_patterns=[

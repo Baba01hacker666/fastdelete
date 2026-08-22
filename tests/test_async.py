@@ -4,8 +4,6 @@ Uses standard library asyncio.run to execute async coroutines independently of p
 """
 
 import asyncio
-from pathlib import Path
-import pytest
 
 from fastdelete import delete_async
 

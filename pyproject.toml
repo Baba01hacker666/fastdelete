@@ -52,6 +52,9 @@ fastdelete = "fastdelete.cli:main"
 where = ["."]
 include = ["fastdelete*"]
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

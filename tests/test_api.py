@@ -2,18 +2,11 @@
 Tests for high-level public Python API in fastdelete.api.
 """
 
-import os
-from pathlib import Path
-import pytest
 
-import fastdelete
 from fastdelete import (
     delete,
     delete_many,
     shred,
-    trash,
-    restore,
-    clean,
     analyze,
     duplicates,
 )
