@@ -115,6 +115,44 @@ def test_cli_main_interactive_confirm_mismatch(tmp_path):
         assert target_dir.exists()
 
 
+def test_cli_main_multi_target_cancel_second_prompt_deletes_nothing(tmp_path):
+    """Confirming all targets happens BEFORE any deletion: cancelling at the
+    second prompt must leave the already-confirmed first target intact."""
+    dir_a = tmp_path / "multi_a"
+    dir_b = tmp_path / "multi_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    (dir_a / "a.txt").write_text("a")
+    (dir_b / "b.txt").write_text("b")
+
+    answers = [str(dir_a), "no way"]  # confirm first, reject second
+    with patch("builtins.input", side_effect=answers):
+        exit_code = main([str(dir_a), str(dir_b)])
+
+    assert exit_code == 2
+    assert dir_a.exists(), "first target must not be deleted when a later prompt is cancelled"
+    assert (dir_a / "a.txt").exists()
+    assert dir_b.exists()
+
+
+def test_cli_main_confirm_interrupt_cancels_cleanly(tmp_path):
+    """Ctrl+C (KeyboardInterrupt) during the confirmation prompt must cancel
+    with exit code 130 and delete nothing."""
+    target_dir = tmp_path / "interrupt_dir"
+    target_dir.mkdir()
+    (target_dir / "keep.txt").write_text("keep me")
+
+    def raise_interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    with patch("builtins.input", side_effect=raise_interrupt):
+        exit_code = main([str(target_dir)])
+
+    assert exit_code == 130
+    assert target_dir.exists()
+    assert (target_dir / "keep.txt").exists()
+
+
 def test_cli_main_safety_refusal():
     """Test safety refusal when target is root filesystem."""
     exit_code = main(["/", "--yes"])

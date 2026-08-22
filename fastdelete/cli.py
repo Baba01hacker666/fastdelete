@@ -392,10 +392,10 @@ def confirm_deletion(
     is_root_or_sys = is_root or is_sys
 
     if identity.is_dir:
-        print("\nType the exact path to confirm:")
+        print("\nType the exact path to confirm deletion:")
         try:
-            user_input = input().strip()
-        except (EOFError, KeyboardInterrupt):
+            user_input = input("> ").strip()
+        except EOFError:
             print("\nConfirmation aborted.")
             return False
 
@@ -412,10 +412,9 @@ def confirm_deletion(
 
         if (is_root_or_sys or is_home) and (allow_root or allow_home):
             print("\n\033[1;31mWARNING: You are deleting a system or home directory!\033[0m")
-            print("Type 'DELETE' to confirm:")
             try:
-                secondary = input().strip()
-            except (EOFError, KeyboardInterrupt):
+                secondary = input("Type 'DELETE' to confirm: ").strip()
+            except EOFError:
                 print("\nConfirmation aborted.")
                 return False
             if secondary != "DELETE":
@@ -426,7 +425,7 @@ def confirm_deletion(
     else:
         try:
             user_input = input(f"Delete {identity.type_description.lower()} '{safe_path_str(identity.abs_path)}'? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print("\nConfirmation aborted.")
             return False
         return user_input in ("y", "yes")
@@ -631,6 +630,62 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 1
 
+    try:
+        deletion_filter = build_filter(args)
+    except FilterParseError as e:
+        sys.stderr.write(f"Error: {e}\n")
+        return 2
+
+    def event_streamer(evt: dict):
+        if getattr(args, "ndjson", False):
+            sys.stdout.write(json.dumps(evt) + "\n")
+            sys.stdout.flush()
+
+    # Phase 1: inspect, safety-check, and confirm EVERY target up front, so
+    # the user sees the full scope of the operation before anything is
+    # deleted. No custom signal handlers are installed here yet: Ctrl+C at a
+    # prompt raises KeyboardInterrupt and cancels cleanly instead of arming
+    # the deletion abort flag while the prompt keeps blocking.
+    identities = []
+    overall_failed = 0
+
+    try:
+        for target in args.targets:
+            try:
+                identity = inspect_target(target)
+            except InvalidTargetError as e:
+                sys.stderr.write(f"Error: {e}\n")
+                overall_failed += 1
+                continue
+
+            try:
+                validate_safety(
+                    identity,
+                    allow_root=args.allow_root,
+                    allow_home=args.allow_home,
+                )
+            except SafetyError as e:
+                sys.stderr.write(f"\033[1;31mSafety Error: {e}\033[0m\n")
+                return 2
+
+            # Confirmation prompt
+            if not args.quiet and not args.yes and not args.dry_run and not args.json and not getattr(args, "ndjson", False):
+                confirmed = confirm_deletion(
+                    target_raw=target,
+                    identity=identity,
+                    allow_root=args.allow_root,
+                    allow_home=args.allow_home,
+                )
+                if not confirmed:
+                    sys.stderr.write("Operation cancelled by user.\n")
+                    return 2
+
+            identities.append(identity)
+    except KeyboardInterrupt:
+        sys.stderr.write("\nOperation cancelled by user.\n")
+        return 130
+
+    # Phase 2: execute deletions with interrupt handling active.
     abort_event = threading.Event()
     active_deleter = None
 
@@ -646,52 +701,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, signal_handler)
 
-    try:
-        deletion_filter = build_filter(args)
-    except FilterParseError as e:
-        sys.stderr.write(f"Error: {e}\n")
-        return 2
-
-    def event_streamer(evt: dict):
-        if getattr(args, "ndjson", False):
-            sys.stdout.write(json.dumps(evt) + "\n")
-            sys.stdout.flush()
-
-    overall_failed = 0
     all_stats: List[DeletionStats] = []
 
-    for target in args.targets:
+    for identity in identities:
         if abort_event.is_set():
             break
-
-        try:
-            identity = inspect_target(target)
-        except InvalidTargetError as e:
-            sys.stderr.write(f"Error: {e}\n")
-            overall_failed += 1
-            continue
-
-        try:
-            validate_safety(
-                identity,
-                allow_root=args.allow_root,
-                allow_home=args.allow_home,
-            )
-        except SafetyError as e:
-            sys.stderr.write(f"\033[1;31mSafety Error: {e}\033[0m\n")
-            return 2
-
-        # Confirmation prompt
-        if not args.quiet and not args.yes and not args.dry_run and not args.json and not getattr(args, "ndjson", False):
-            confirmed = confirm_deletion(
-                target_raw=target,
-                identity=identity,
-                allow_root=args.allow_root,
-                allow_home=args.allow_home,
-            )
-            if not confirmed:
-                sys.stderr.write("Operation cancelled by user.\n")
-                return 2
 
         progress = None
         if not args.quiet and not args.json and not getattr(args, "ndjson", False):
